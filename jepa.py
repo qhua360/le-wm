@@ -17,8 +17,12 @@ class JEPA(nn.Module):
         action_encoder,
         projector=None,
         pred_proj=None,
+        pixel_keys=("pixels",),
     ):
         super().__init__()
+
+        # image keys of the observation; several views are stacked on the channel axis
+        self.pixel_keys = tuple(pixel_keys)
 
         self.encoder = encoder
         self.predictor = predictor
@@ -31,7 +35,7 @@ class JEPA(nn.Module):
         info: dict with pixels and action keys
         """
 
-        pixels = info['pixels'].float()
+        pixels = torch.cat([info[k].float() for k in self.pixel_keys], dim=-3)
         b = pixels.size(0)
         pixels = rearrange(pixels, "b t ... -> (b t) ...") # flatten for encoding
         output = self.encoder(pixels, interpolate_pos_encoding=True)
@@ -66,8 +70,9 @@ class JEPA(nn.Module):
          - T is the time horizon
         """
 
-        assert "pixels" in info, "pixels not in info_dict"
-        H = info["pixels"].size(2)
+        obs_key = self.pixel_keys[0]
+        assert obs_key in info, f"{obs_key} not in info_dict"
+        H = info[obs_key].size(2)
         B, S, T = action_sequence.shape[:3]
         act_0, act_future = torch.split(action_sequence, [H, T - H], dim=2)
         info["action"] = act_0
@@ -128,7 +133,8 @@ class JEPA(nn.Module):
     def get_cost(self, info_dict: dict, action_candidates: torch.Tensor):
         """ Compute the cost of action candidates given an info dict with goal and initial state."""
 
-        assert "goal" in info_dict, "goal not in info_dict"
+        goal_keys = ["goal" if k == "pixels" else f"goal_{k}" for k in self.pixel_keys]
+        assert all(k in info_dict for k in goal_keys), f"{goal_keys} not in info_dict"
 
         device = next(self.parameters()).device
         for k in list(info_dict.keys()):
@@ -136,7 +142,8 @@ class JEPA(nn.Module):
                 info_dict[k] = info_dict[k].to(device)
 
         goal = {k: v[:, 0] for k, v in info_dict.items() if torch.is_tensor(v)}
-        goal["pixels"] = goal["goal"]
+        if "goal" in goal:
+            goal["pixels"] = goal["goal"]
 
         for k in info_dict:
             if k.startswith("goal_"):

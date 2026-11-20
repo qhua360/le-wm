@@ -1,0 +1,17 @@
+# cube.yaml with a stereo camera pair (stereo.py): the left camera is cube.yaml's view, the right one sits
+# `stereo.baseline` metres along its x axis. The dataset is the one render_stereo.py wrote for that baseline.
+defaults:
+  - cube
+  - _self_
+
+world:
+  multiview: True
+
+stereo:
+  baseline: 0.06
+
+eval:
+  dataset_name: ogbench/cube_single_expert_stereo_b06
+
+output:
+  filename: ogb_cube_stereo_results.txt

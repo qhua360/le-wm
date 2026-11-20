@@ -51,6 +51,28 @@ export STABLEWM_HOME=/path/to/your/storage
 
 Dataset names are specified without the `.h5` extension. For example, `config/train/data/pusht.yaml` references `pusht_expert_train`, which resolves to `$STABLEWM_HOME/pusht_expert_train.h5`.
 
+## Stereo LeWM (this branch)
+
+LeWM on Cube-Single with a second camera: the dataset's view plus a copy shifted along its x axis, stacked to 6 channels
+into the same encoder. Loss, predictor and planner are unchanged.
+
+It needs stable-worldmodel `main` plus the configurable Cube cameras (`CubeEnv(cameras=...)`, branch `cube-cameras` of
+`qhua360/stable-worldmodel` until it is merged), so the solver configs here use the current
+`stable_worldmodel.planning.solver` API and datasets resolve to `$STABLEWM_HOME/datasets/<name>.h5`.
+
+```bash
+# 1. add the right view to the released dataset (checks first that the left view re-renders to the stored pixels)
+python render_stereo.py --src $STABLEWM_HOME/datasets/ogbench/cube_single_expert.h5 \
+    --dst $STABLEWM_HOME/datasets/ogbench/cube_single_expert_stereo_b06.h5 --baseline 0.06
+# 2. train and evaluate
+python train.py data=ogb_stereo model=lewm_stereo output_model_name=lewm_stereo_b06 subdir=lewm_stereo_b06
+python eval.py --config-name=cube_stereo policy=lewm_stereo_b06/weights_epoch_100.pt
+```
+
+For another baseline, pass `--baseline` and a new `--dst`, and set `stereo.baseline` / `eval.dataset_name` (eval) and
+`data.dataset.name` (train). `scripts/smoke_stereo.sh` runs the whole path on a few batches, `pytest tests/test_stereo.py`
+the unit tests.
+
 ## Training
 
 `jepa.py` contains the PyTorch implementation of LeWM. Training is configured via [Hydra](https://hydra.cc/) config files under `config/train/`.
