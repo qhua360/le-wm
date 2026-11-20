@@ -16,6 +16,13 @@ mkdir -p "$STABLEWM_HOME/datasets/ogbench" "$STABLEWM_HOME/checkpoints"
 echo "== apt"
 sudo apt-get update -qq >/dev/null
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq zstd swig build-essential libgl1 libegl1 >/dev/null
+# Lambda Stack ships the compute libraries only; without the NVIDIA GL libraries EGL falls back to Mesa's software
+# renderer (llvmpipe), ~150x slower. Install the ones matching the loaded driver.
+if ! ldconfig -p | grep -q libEGL_nvidia; then
+    PKG="$(dpkg-query -W -f='${Package}\n' 'libnvidia-compute-*' | head -1)"
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+        "${PKG/compute/gl}=$(dpkg-query -W -f='${Version}' "$PKG")" >/dev/null
+fi
 command -v uv >/dev/null || { curl -LsSf https://astral.sh/uv/install.sh | sh; }
 export PATH="$HOME/.local/bin:$PATH"
 
@@ -25,7 +32,16 @@ echo "== venv"
 uv pip install -q --python .venv/bin/python $SWM_SPEC \
     "stable-pretraining @ git+https://github.com/galilai-group/stable-pretraining@$SPT_REV" pytest huggingface_hub
 .venv/bin/python -c "import torch; assert torch.cuda.is_available(), f'torch {torch.__version__} (cuda {torch.version.cuda}) cannot init on this driver'; print('torch', torch.__version__, torch.cuda.get_device_name(0))"
-.venv/bin/python -c "import mujoco; mujoco.Renderer(mujoco.MjModel.from_xml_string('<mujoco/>'), 8, 8); print('mujoco', mujoco.__version__, 'EGL ok')"
+.venv/bin/python -c "
+import mujoco
+renderer = mujoco.Renderer(mujoco.MjModel.from_xml_string('<mujoco/>'), 8, 8)  # keeps the context current
+renderer.render()
+from OpenGL import GL
+try: name = GL.glGetString(GL.GL_RENDERER)
+except Exception as error: name = getattr(error, 'result', b'')
+print('mujoco', mujoco.__version__, 'EGL renderer', name)
+assert name and b'llvmpipe' not in name, 'EGL is rendering in software (llvmpipe), not on the GPU'
+"
 
 echo "== tests"
 .venv/bin/python -m pytest tests/test_stereo.py -q

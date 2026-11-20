@@ -23,6 +23,11 @@ os.environ.setdefault("MUJOCO_GL", "egl")
 import h5py
 import numpy as np
 
+try:  # registers the compression filters (Blosc, ...) of the released datasets
+    import hdf5plugin  # noqa: F401
+except ImportError:
+    pass
+
 from stereo import LEFT, PIXEL_KEYS, RIGHT, disparity_report, format_report, stereo_cameras
 
 INDEX_COLS = ("ep_len", "ep_offset")
@@ -34,6 +39,24 @@ def datasets(handle):
     found = {}
     handle.visititems(lambda name, item: found.update({name: item}) if isinstance(item, h5py.Dataset) else None)
     return found
+
+
+def storage_kwargs(column, rows=None):
+    """Chunking and compression of ``column``, for a new dataset stored the same way."""
+    kwargs = {}
+    if column.chunks:
+        kwargs["chunks"] = column.chunks if rows is None else (min(column.chunks[0], rows), *column.chunks[1:])
+    if column.compression in ("gzip", "lzf", "szip"):  # a built-in filter; plugins report "unknown"
+        kwargs.update(compression=column.compression, compression_opts=column.compression_opts, shuffle=column.shuffle)
+        return kwargs
+    plist = column.id.get_create_plist()
+    for index in range(plist.get_nfilters()):
+        code, _flags, options, _name = plist.get_filter(index)
+        if code >= 256:  # a registered plugin filter
+            if code == 32001:  # Blosc: the first four values are filled in from the chunk when it is written
+                options = (0, 0, 0, 0, *options[4:])
+            kwargs.update(compression=code, compression_opts=tuple(options))
+    return kwargs
 
 
 def make_env(baseline, env_type="single", size=224):
@@ -115,9 +138,7 @@ def create_dst(src_path, dst_path, episodes):
             rows = int(src["ep_offset"][episodes - 1] + lengths[-1])
             for name, column in datasets(src).items():
                 count = episodes if name in INDEX_COLS else rows
-                kwargs = dict(compression=column.compression, compression_opts=column.compression_opts)
-                if column.chunks:
-                    kwargs["chunks"] = (min(column.chunks[0], count), *column.chunks[1:])
+                kwargs = storage_kwargs(column, count)
                 out = dst.create_dataset(name, shape=(count, *column.shape[1:]), dtype=column.dtype, **kwargs)
                 for start in range(0, count, 4096):
                     out[start : start + 4096] = column[start : min(start + 4096, count)]
@@ -133,10 +154,7 @@ def render_right(dst_path, baseline, env_type, workers, batch):
         if left_key not in dst:
             dst[left_key] = pixels  # hard link: the same data under the left view's name
         if right_key not in dst:
-            kwargs = dict(compression=pixels.compression, compression_opts=pixels.compression_opts)
-            if pixels.chunks:
-                kwargs["chunks"] = pixels.chunks
-            column = dst.create_dataset(right_key, shape=pixels.shape, dtype=np.uint8, **kwargs)
+            column = dst.create_dataset(right_key, shape=pixels.shape, dtype=np.uint8, **storage_kwargs(pixels))
             column.attrs["rows_done"] = 0
             column.attrs["baseline_m"] = float(baseline)
         column = dst[right_key]

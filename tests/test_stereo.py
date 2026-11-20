@@ -142,3 +142,24 @@ def test_left_check_rejects_wrong_states(tiny_h5, tmp_path):
         out["pixels"][:] = 255 - out["pixels"][:]
     with pytest.raises(SystemExit, match="not reproduced"):
         render_stereo.main(["--src", str(broken), "--check-only", "--check-rows", "5"])
+
+
+def test_plugin_compression_is_kept(tiny_h5, tmp_path):
+    hdf5plugin = pytest.importorskip("hdf5plugin")
+    blosc = tmp_path / "blosc.h5"
+    with h5py.File(tiny_h5) as src, h5py.File(blosc, "w") as out:
+        for name in src:
+            if name == "pixels":
+                out.create_dataset(name, data=src[name][:], chunks=(4, 224, 224, 3), **hdf5plugin.Blosc(cname="lz4"))
+            else:
+                src.copy(name, out)
+    dst = tmp_path / "blosc_stereo.h5"
+    args = ["--src", str(blosc), "--dst", str(dst), "--check-rows", "5", "--workers", "1", "--episodes", "1"]
+    assert render_stereo.main(args) == 0
+    with h5py.File(blosc) as src, h5py.File(dst) as out:
+        rows = len(out["pixels"])
+        np.testing.assert_array_equal(out["pixels"][:], src["pixels"][:rows])
+        for key in ("pixels", "pixels.right"):
+            filters = out[key].id.get_create_plist()
+            assert filters.get_filter(0)[0] == 32001 and out[key].chunks == (4, 224, 224, 3)
+        assert np.abs(out["pixels.right"][0].astype(int) - out["pixels"][0]).mean() > 1

@@ -42,7 +42,7 @@ if [[ "$DEVICE" == cuda ]]; then
     TRAIN_DEVICE=(trainer.accelerator=gpu trainer.devices=1)  # config defaults otherwise: bf16, batch 128
     WORKERS=(num_workers=6)
 else
-    TRAIN_DEVICE=(trainer.accelerator=cpu trainer.precision=32 loader.batch_size=8)
+    TRAIN_DEVICE=(trainer.accelerator=cpu trainer.precision=32)
     WORKERS=(num_workers=0 loader.persistent_workers=false loader.prefetch_factor=null)
 fi
 if [[ -n "${FULL_CEM:-}" ]]; then
@@ -52,7 +52,10 @@ else
 fi
 # short episodes of the tiny dataset need a short goal offset
 EVAL=(eval.num_eval="$EVAL_EPISODES" solver.device="$DEVICE" +device="$DEVICE" "${CEM[@]}")
-[[ -n "${SRC:-}" ]] || EVAL+=(eval.goal_offset_steps=10 eval.eval_budget=10 plan_config.horizon=2 plan_config.receding_horizon=2)
+if [[ -z "${SRC:-}" ]]; then
+    EVAL+=(eval.goal_offset_steps=10 eval.eval_budget=10 plan_config.horizon=2 plan_config.receding_horizon=2)
+    TRAIN_DEVICE+=(loader.batch_size=8)  # the tiny dataset has fewer clips than one batch of 128
+fi
 
 cd "$STABLEWM_HOME/smoke_run"
 for arm in mono stereo; do
