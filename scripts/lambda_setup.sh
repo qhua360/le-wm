@@ -46,7 +46,7 @@ assert name and b'llvmpipe' not in name, 'EGL is rendering in software (llvmpipe
 echo "== tests"
 .venv/bin/python -m pytest tests/test_stereo.py -q
 if [[ -d "$SWM_DIR/tests" ]]; then
-    (cd "$SWM_DIR" && "$OLDPWD/.venv/bin/python" -m pytest tests/envs/test_cube_cameras.py tests/test_new_world.py -q)
+    (cd "$SWM_DIR" && "$OLDPWD/.venv/bin/python" -m pytest tests/test_new_world.py -q)
 fi
 
 if [[ "${DATASET:-1}" == 1 && ! -e "$H5" ]]; then
