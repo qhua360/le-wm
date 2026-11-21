@@ -1,1 +1,3 @@
 __pycache__/
+.venv/
+smoke_a10/

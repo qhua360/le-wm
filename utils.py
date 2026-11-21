@@ -10,6 +10,27 @@ def get_img_preprocessor(source: str, target: str, img_size: int = 224):
     return dt.transforms.Compose(to_image, resize)
 
 
+class Aliased:
+    """Apply ``transform`` to ``batch[key]`` under a dot-free alias. stable-pretraining's transforms read a dot in
+    a key as nesting, while multi-view columns are named ``pixels.<view>``."""
+
+    def __init__(self, transform, key: str, alias: str):
+        self.transform, self.key, self.alias = transform, key, alias
+
+    def __call__(self, batch):
+        batch[self.alias] = batch.pop(self.key)
+        batch = self.transform(batch)
+        batch[self.key] = batch.pop(self.alias)
+        return batch
+
+
+def get_view_preprocessor(key: str, img_size: int = 224):
+    """``get_img_preprocessor`` for an image column of any name (``pixels``, ``pixels.left``, ...)."""
+    alias = key.replace(".", "_")
+    transform = get_img_preprocessor(source=alias, target=alias, img_size=img_size)
+    return transform if alias == key else Aliased(transform, key, alias)
+
+
 class ZScoreNormalizer:
     """Picklable z-score normalizer — uses a class instead of a closure so it
     survives pickle when DataLoader workers are spawned (required by LanceDataset)."""

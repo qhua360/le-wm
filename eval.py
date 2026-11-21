@@ -1,6 +1,6 @@
 import os
 
-os.environ["MUJOCO_GL"] = "egl"
+os.environ.setdefault("MUJOCO_GL", "egl")
 
 import time
 from pathlib import Path
@@ -55,13 +55,19 @@ def run(cfg: DictConfig):
 
     # create world environment
     cfg.world.max_episode_steps = 2 * cfg.eval.eval_budget
-    world = swm.World(**cfg.world, image_shape=(224, 224))
+    stereo = cfg.get("stereo")
+    pixel_keys = ("pixels",)
+    world_kwargs = {}
+    if stereo is not None:  # two cameras, rendered as pixels.left / pixels.right
+        from stereo import PIXEL_KEYS as pixel_keys, stereo_cameras
 
-    # create the transform
-    transform = {
-        "pixels": img_transform(cfg),
-        "goal": img_transform(cfg),
-    }
+        world_kwargs["cameras"] = stereo_cameras(stereo.baseline)
+    world = swm.World(**cfg.world, image_shape=(224, 224), **world_kwargs)
+
+    # create the transform: every view and its goal image
+    transform = {"pixels": img_transform(cfg), "goal": img_transform(cfg)}
+    for key in pixel_keys:
+        transform[key] = transform[f"goal_{key}"] = img_transform(cfg)
 
     dataset = get_dataset(cfg, cfg.eval.dataset_name)
     stats_dataset = dataset  # get_dataset(cfg, cfg.dataset.stats)
@@ -86,12 +92,16 @@ def run(cfg: DictConfig):
 
     if policy != "random":
         model = swm.wm.utils.load_pretrained(cfg.policy)
-        model = model.to("cuda")
+        trained_keys = tuple(getattr(model, "pixel_keys", ("pixels",)))
+        assert trained_keys == tuple(pixel_keys), (
+            f"{cfg.policy} was trained on {trained_keys}, the eval config renders {pixel_keys}"
+        )
+        model = model.to(cfg.get("device", "cuda"))
         model = model.eval()
         model.requires_grad_(False)
         model.interpolate_pos_encoding = True
         config = swm.PlanConfig(**cfg.plan_config)
-        solver = hydra.utils.instantiate(cfg.solver, model=model)
+        solver = hydra.utils.instantiate(cfg.solver, cost=model)  # JEPA.get_cost makes the model a Costable
         policy = swm.policy.WorldModelPolicy(
             solver=solver, config=config, process=process, transform=transform
         )

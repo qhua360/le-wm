@@ -11,7 +11,7 @@ from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf, open_dict
 
 from module import SIGReg
-from utils import get_column_normalizer, get_img_preprocessor, SaveCkptCallback
+from utils import get_column_normalizer, get_view_preprocessor, SaveCkptCallback
 
 
 def lejepa_forward(self, batch, stage, cfg):
@@ -56,7 +56,8 @@ def run(cfg):
     dataset = swm.data.load_dataset(
         dataset_name, transform=None, cache_dir=cache_dir, **dataset_cfg
     )
-    transforms = [get_img_preprocessor(source='pixels', target='pixels', img_size=cfg.img_size)]
+    pixel_keys = cfg.model.get("pixel_keys", ["pixels"])  # one image column per view
+    transforms = [get_view_preprocessor(key, img_size=cfg.img_size) for key in pixel_keys]
     
     with open_dict(cfg):
         for col in cfg.data.dataset.keys_to_load:
