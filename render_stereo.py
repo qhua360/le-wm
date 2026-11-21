@@ -69,6 +69,7 @@ def make_env(baseline, env_type="single", size=224):
         width=size,
         height=size,
         visualize_info=False,
+        multiview=True,
         cameras=stereo_cameras(baseline),
     )
     env.reset(seed=0)
